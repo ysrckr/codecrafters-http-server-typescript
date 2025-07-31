@@ -8,6 +8,7 @@ const server = net.createServer((socket) => {
   socket.on("close", () => {
     socket.end();
   });
+  socket.write("HTTP/1.1 200 OK\n\r\n\r")
 });
 
 server.listen(4221, "localhost");
