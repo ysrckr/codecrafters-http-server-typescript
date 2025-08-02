@@ -51,7 +51,12 @@ class Server {
   private _method: HTTP_METHOD = HTTP_METHOD.GET;
   private _path = "";
   private _httpVersion = HTTPV;
-  private _headers: Record<string, string> | null = null;
+  private _headers: { [key: string]: string }[] = [];
+  private _endPoints = {
+    root: "/",
+    echo: "/echo",
+    userAgent: "/user-agent",
+  };
 
   constructor(port: number, hostname: string) {
     this._instance = net.createServer((socket) => {
@@ -63,8 +68,9 @@ class Server {
         this.extractHeaders();
         this.extractMethod();
 
-        socket.write(this.response);
-        socket.end();
+        socket.write(this.response, () => {
+          socket.end();
+        });
       });
       socket.on("close", () => {
         socket.end();
@@ -94,7 +100,7 @@ class Server {
 
   private extractHeaders() {
     if (!this._request) return;
-    this._request
+    this._headers = this._request
       .split(CRLF)
       .slice(1)
       .filter((el) => el.length !== 0)
@@ -123,6 +129,16 @@ class Server {
           return `${this._httpVersion} ${HTTP_STATUS.OK}${CRLF}Content-Type: ${CONTENT_TYPE.PLAIN_TEXT}${CRLF}Content-Length: ${contentSize}${CRLF}${CRLF}${content}`;
         }
 
+        if (this.isUserAgentPath) {
+          const content =
+            this._headers.find((header) => header["User-Agent"])?.[
+              "User-Agent"
+            ] || "";
+          console.log(content);
+          const contentSize = content.length;
+          return `${this._httpVersion} ${HTTP_STATUS.OK}${CRLF}Content-Type: ${CONTENT_TYPE.PLAIN_TEXT}${CRLF}Content-Length: ${contentSize}${CRLF}${CRLF}${content}`;
+        }
+
         return `${this._httpVersion} ${HTTP_STATUS.NOTFOUND}${CRLF}${CRLF}`;
       }
 
@@ -133,13 +149,24 @@ class Server {
 
   private get isRootPath() {
     if (!this._path) return;
-    return this._path === "/";
+    return this._path === this._endPoints.root;
   }
 
   private get isEchoPath() {
     if (!this._path) return;
+    return this._path.startsWith(this._endPoints.echo);
+  }
 
-    return this._path.startsWith("/echo");
+  private get isUserAgentPath() {
+    if (!this._path) return;
+    return this._path.startsWith(this._endPoints.userAgent);
+  }
+
+  public set endPoint(endPoints: { [key: string]: string }[]) {
+    this._endPoints = {
+      ...this._endPoints,
+      ...endPoints,
+    };
   }
 
   public listen() {
