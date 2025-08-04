@@ -1,5 +1,8 @@
 import * as net from "net";
 
+import fs from "fs";
+import path from "path";
+
 enum HTTP_STATUS {
   OK = "200 OK",
   NOTFOUND = "404 Not Found",
@@ -17,6 +20,7 @@ enum HTTP_METHOD {
 
 enum CONTENT_TYPE {
   PLAIN_TEXT = "text/plain",
+  OCTATE_STREAM = "application/octet-stream",
 }
 // You can use print statements as follows for debugging, they'll be visible when running tests.
 console.log("Logs from your program will appear here!");
@@ -24,28 +28,9 @@ console.log("Logs from your program will appear here!");
 const HTTPV = "HTTP/1.1";
 const CRLF = "\r\n";
 
-// Uncomment this to pass the first stage
-// const server = net.createServer((socket) => {
-//   socket.on("data", (data) => {
-//     const request = data.toString();
-
-//     if (getPath(request) !== "/") {
-//       return socket.write(HTTPV + " " + HTTP_STATUS.NOTFOUND + CRLF + CRLF);
-//     }
-//     socket.write(HTTPV + " " + HTTP_STATUS.OK + CRLF + CRLF);
-
-//     socket.on("close", () => {
-//       socket.end();
-//     });
-//   });
-//   socket.on("close", () => {
-//     socket.end();
-//   });
-// });
-
 class Server {
-  private _port: number;
-  private _hostname: string;
+  private _port: number = 3000;
+  private _hostname: string = "localhost";
   private _instance: net.Server;
   private _request = "";
   private _method: HTTP_METHOD = HTTP_METHOD.GET;
@@ -56,28 +41,31 @@ class Server {
     root: "/",
     echo: "/echo",
     userAgent: "/user-agent",
+    file: "/files",
   };
 
-  constructor(port: number, hostname: string) {
-    this._instance = net.createServer((socket) => {
-      socket.on("data", (data) => {
-        this._request = data.toString();
+  constructor() {
+    this._instance = net.createServer((socket) =>
+      this.connectionListener(socket),
+    );
+  }
 
-        this.extractPath();
-        this.extractHttpVersion();
-        this.extractHeaders();
-        this.extractMethod();
+  private connectionListener(socket: net.Socket) {
+    socket.on("data", (data) => {
+      this._request = data.toString();
 
-        socket.write(this.response, () => {
-          socket.end();
-        });
-      });
-      socket.on("close", () => {
+      this.extractPath();
+      this.extractHttpVersion();
+      this.extractHeaders();
+      this.extractMethod();
+
+      socket.write(this.response, () => {
         socket.end();
       });
     });
-    this._port = port;
-    this._hostname = hostname;
+    socket.on("close", () => {
+      socket.end();
+    });
   }
 
   private extractMethod() {
@@ -138,12 +126,55 @@ class Server {
           const contentSize = content.length;
           return `${this._httpVersion} ${HTTP_STATUS.OK}${CRLF}Content-Type: ${CONTENT_TYPE.PLAIN_TEXT}${CRLF}Content-Length: ${contentSize}${CRLF}${CRLF}${content}`;
         }
+        const filename = this.fileNameFromRequest || "";
+        const filePath = path.resolve(
+          "/tmp/data/codecrafters.io/http-server-tester/",
+          filename,
+        );
 
+        if (this.isFilePath(filePath)) {
+          if (!filename) {
+            return `${this._httpVersion} ${HTTP_STATUS.NOTFOUND}${CRLF}${CRLF}`;
+          }
+
+          if (!this.checkIfFileExists(filePath)) {
+            return `${this._httpVersion} ${HTTP_STATUS.NOTFOUND}${CRLF}${CRLF}`;
+          }
+
+          const fileSize = this.fileSize(filePath);
+          const fileContent = this.fileContent(filePath);
+
+          console.log(fileContent);
+
+          return `${this._httpVersion} ${HTTP_STATUS.OK}${CRLF}Content-Type: ${CONTENT_TYPE.OCTATE_STREAM}${CRLF}Content-Length: ${fileSize}${CRLF}${CRLF}${fileContent}`;
+        }
         return `${this._httpVersion} ${HTTP_STATUS.NOTFOUND}${CRLF}${CRLF}`;
       }
 
       default:
         return `${this._httpVersion} ${HTTP_STATUS.FORBIDDEN}${CRLF}${CRLF}`;
+    }
+  }
+
+  private checkIfFileExists(path: string) {
+    const isFileExists = fs.existsSync(path);
+    return isFileExists;
+  }
+
+  private fileContent(path: string) {
+    const fileContent = fs.readFileSync(path);
+    return Buffer.from(fileContent);
+  }
+
+  private fileSize(path: string) {
+    try {
+      const file = Bun.file(path);
+
+      const fileSize = file.size;
+      return fileSize;
+    } catch (error) {
+      console.error(error);
+      return 0;
     }
   }
 
@@ -162,6 +193,22 @@ class Server {
     return this._path.startsWith(this._endPoints.userAgent);
   }
 
+  private isFilePath(path: string) {
+    if (!this._path) return;
+    const isFileExists = this.checkIfFileExists(path);
+
+    return this._path.startsWith(this._endPoints.file) && isFileExists;
+  }
+
+  private get fileNameFromRequest() {
+    if (!this.isFilePath) return null;
+    return this._path
+      .replace(this._endPoints.file, "")
+      .split("/")
+      .join("")
+      .trim();
+  }
+
   public set endPoint(endPoints: { [key: string]: string }[]) {
     this._endPoints = {
       ...this._endPoints,
@@ -169,14 +216,14 @@ class Server {
     };
   }
 
-  public listen() {
+  public listen(port: number, hostname: string) {
+    this._port = port;
+    this._hostname = hostname;
     this._instance.listen(this._port, this._hostname);
     return this._instance;
   }
 }
 
-const server = new Server(4221, "localhost");
+const server = new Server();
 
-server.listen();
-
-// server.listen(4221, "localhost");
+server.listen(4221, "localhost");
