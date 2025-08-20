@@ -5,6 +5,7 @@ import path from "path";
 
 enum HTTP_STATUS {
   OK = "200 OK",
+  CREATED = "201 Created",
   NOTFOUND = "404 Not Found",
   FORBIDDEN = "403 Forbidden",
   ERROR = "500 Server Error",
@@ -32,7 +33,7 @@ const CRLF = "\r\n";
 
 class Request {
   public headers: { [key: HEADERS_TYPE | string]: string } = {};
-  private _body: string = "";
+  public body: string | null = "";
   private _version: string = "HTTP/1.1";
   private _data: string = "";
   private _method: HTTP_METHOD | null = null;
@@ -40,49 +41,6 @@ class Request {
   private _params: { [key: string]: string } = {};
 
   constructor() {}
-
-  private extractPath() {
-    if (!this._data) return;
-    this._path = this._data.split(CRLF)[0].split(" ")[1];
-  }
-
-  private extractMethod() {
-    if (!this._data) return;
-    this._method = this._data
-      .split(CRLF)[0]
-      .split(" ")[0]
-      .toLowerCase() as HTTP_METHOD;
-  }
-
-  private extractHeaders() {
-    if (!this._data) return;
-    const headers = this._data
-      .split(CRLF)
-      .slice(2)
-      .filter((header) => Boolean(header));
-    headers.forEach((header) => {
-      const headerKey = header.split(":")[0].trim();
-      const headerValue = header.split(":")[1].trim();
-
-      this.headers[headerKey] = headerValue;
-    });
-  }
-
-  private extractParams() {
-    if (!this._path) return;
-    const pathParts = this._path.split("/").slice(1); // Remove leading slash
-
-    for (let i = 1; i < pathParts.length; i += 2) {
-      if (pathParts[i]) {
-        this._params[pathParts[i - 1]] = pathParts[i];
-      }
-    }
-  }
-
-  private extractHttpVersion() {
-    if (!this._data) return;
-    this._version = this._data.split(CRLF)[0].split(" ")[2];
-  }
 
   public get httpVersion() {
     return this._version;
@@ -96,17 +54,48 @@ class Request {
     return this._path;
   }
 
+  public set path(path: string) {
+    this._path = path;
+  }
+
   public get params() {
     return this._params;
   }
 
   public init(data: Buffer<ArrayBufferLike>) {
-    this._data = data.toString();
-    this.extractHttpVersion();
-    this.extractHeaders();
-    this.extractMethod();
-    this.extractPath();
-    this.extractParams();
+    if (!data) return;
+    const requestData = data.toString();
+    this._data = requestData;
+    const version = requestData.split(CRLF)[0].split(" ")[2] || "HTTP/1.1";
+    const method = requestData
+      .split(CRLF)[0]
+      .split(" ")[0]
+      ?.toLowerCase() as HTTP_METHOD;
+    const headers = requestData.split(CRLF).slice(1, -2);
+    const path = requestData.split(CRLF)[0].split(" ")[1];
+    this._version = version || "HTTP/1.1";
+    this._method = method || HTTP_METHOD.GET;
+    this.path = path;
+    this.headers = {};
+    headers.forEach((header) => {
+      const [key, value] = header.split(": ");
+      this.headers[key as HEADERS_TYPE] = value;
+    });
+    const pathParts = this.path.split("/").slice(1);
+
+    for (let i = 1; i < pathParts.length; i += 2) {
+      if (pathParts[i]) {
+        this._params[pathParts[i - 1]] = pathParts[i];
+      }
+    }
+
+    if (this.method === HTTP_METHOD.POST) {
+      console.log("Handling POST request");
+      const data = requestData.split(CRLF);
+      if (data.length === 0) return;
+      const body = data[data.length - 1];
+      this.body = body;
+    }
   }
 }
 
@@ -218,14 +207,15 @@ class Server {
   }
 
   private handle() {
-    const route = this._routes.find(
-      (r) =>
+    const route = this._routes.find((r) => {
+      return (
         (r.path === this._request.path && r.method === this._request.method) ||
         (r.params &&
           r.params.length > 0 &&
           r.method === this._request.method &&
-          this._request.path.startsWith(r.path)),
-    );
+          this._request.path.startsWith(r.path))
+      );
+    });
 
     if (route) {
       route.handler(this._request, this._response);
@@ -308,6 +298,7 @@ function echoHandler(req: Request, res: Response) {
 
 function userAgentHandler(req: Request, res: Response) {
   const userAgent = req.headers["User-Agent"];
+  console.log(userAgent);
   res.send(HTTP_STATUS.OK, {
     headers: {
       "Content-Type": CONTENT_TYPE.PLAIN_TEXT,
@@ -338,10 +329,26 @@ function fileHandler(req: Request, res: Response) {
   });
 }
 
+function filePostHandler(req: Request, res: Response) {
+  const filename = req.params.files;
+  console.log(filename);
+  const filePath = path.resolve(
+    "/tmp/data/codecrafters.io/http-server-tester/",
+    filename,
+  );
+
+  const body = req.body;
+
+  createFile(filePath, body!);
+
+  res.send(HTTP_STATUS.CREATED);
+}
+
 server.get("/", rootHandler);
 server.get("/echo/:message", echoHandler);
 server.get("/user-agent", userAgentHandler);
 server.get("/files/:filename", fileHandler);
+server.post("/files/:filename", filePostHandler);
 
 server.listen(4221, "localhost");
 
@@ -353,4 +360,12 @@ function checkIfFileExists(path: string) {
 function fileContent(path: string) {
   const fileContent = fs.readFileSync(path);
   return Buffer.from(fileContent);
+}
+
+function createFile(
+  path: string,
+  data: string | NodeJS.ArrayBufferView,
+  options?: fs.WriteFileOptions,
+) {
+  fs.writeFileSync(path, data, options);
 }
