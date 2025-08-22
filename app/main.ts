@@ -2,6 +2,7 @@ import * as net from "net";
 
 import fs from "fs";
 import path from "path";
+import zlib from "zlib";
 
 enum HTTP_STATUS {
   OK = "200 OK",
@@ -25,14 +26,10 @@ enum CONTENT_TYPE {
   OCTATE_STREAM = "application/octet-stream",
 }
 
-enum HEADERS_TYPE {
-  CONTENT_TYPE = "content-type",
-}
-
 const CRLF = "\r\n";
 
 class Request {
-  public headers: { [key: HEADERS_TYPE | string]: string } = {};
+  public headers: { [key: string]: string } = {};
   public body: string | null = "";
   private _version: string = "HTTP/1.1";
   private _data: string = "";
@@ -79,7 +76,7 @@ class Request {
     this.headers = {};
     headers.forEach((header) => {
       const [key, value] = header.split(": ");
-      this.headers[key as HEADERS_TYPE] = value;
+      this.headers[key] = value;
     });
     const pathParts = this.path.split("/").slice(1);
 
@@ -100,7 +97,7 @@ class Request {
 }
 
 class Response {
-  private _headers: { [key: HEADERS_TYPE | string]: string } = {};
+  private _headers: { [key: string]: string } = {};
   private _body: string | Buffer = "";
   private _value: string = "";
   private _version: string = "HTTP/1.1";
@@ -122,7 +119,7 @@ class Response {
   public send(
     status: HTTP_STATUS,
     options?: {
-      headers?: { [key: HEADERS_TYPE | string]: string };
+      headers?: { [key: string]: string };
       body?: string | Buffer;
     },
   ) {
@@ -287,18 +284,46 @@ function rootHandler(req: Request, res: Response) {
 
 function echoHandler(req: Request, res: Response) {
   const message = req.params.echo;
+  const acceptEncoding = req.headers?.["Accept-Encoding"]?.split(",");
+  let contentEncoding: { [key: string]: string } = {
+    "Content-Encoding": "",
+  };
+  let body: {
+    data: string;
+    compression: string | null;
+  } = {
+    data: message,
+    compression: null,
+  };
+
+  let headers: { [key: string]: string } = {
+    "Content-Type": CONTENT_TYPE.PLAIN_TEXT,
+  };
+  if (acceptEncoding?.length > 0) {
+    const result = compress(acceptEncoding[0], body.data);
+    body = { data: result.data.toString(), compression: result.compression };
+    contentEncoding["Content-Encoding"] = result.compression || "";
+  }
+
+  if (acceptEncoding?.length > 0 && body.compression) {
+    headers = { ...headers, ...contentEncoding };
+  }
+
+  const contentLength = String(body.data).length.toString();
+
+  if (contentLength) {
+    headers["Content-Length"] = contentLength;
+  }
+
   res.send(HTTP_STATUS.OK, {
-    headers: {
-      "Content-Type": CONTENT_TYPE.PLAIN_TEXT,
-      "Content-Length": message.length.toString(),
-    },
-    body: message,
+    headers,
+    body: String(body.data),
   });
 }
 
 function userAgentHandler(req: Request, res: Response) {
   const userAgent = req.headers["User-Agent"];
-  console.log(userAgent);
+
   res.send(HTTP_STATUS.OK, {
     headers: {
       "Content-Type": CONTENT_TYPE.PLAIN_TEXT,
@@ -368,4 +393,33 @@ function createFile(
   options?: fs.WriteFileOptions,
 ) {
   fs.writeFileSync(path, data, options);
+}
+
+function compress(
+  compression: string,
+  data: Buffer<ArrayBuffer> | string,
+): {
+  data: Buffer<ArrayBufferLike> | Buffer<ArrayBuffer> | string;
+  compression: string | null;
+} {
+  switch (compression) {
+    case "br": {
+      const compressed = zlib.brotliCompressSync(data);
+      return { data: compressed, compression };
+    }
+    case "gzip": {
+      const compressed = zlib.gzipSync(data);
+      return { data: compressed, compression };
+    }
+    case "deflate": {
+      const compressed = zlib.deflateSync(data);
+      return { data: compressed, compression };
+    }
+    case "zstd": {
+      const compressed = zlib.zstdCompressSync(data);
+      return { data: compressed, compression };
+    }
+    default:
+      return { data, compression: null };
+  }
 }
