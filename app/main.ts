@@ -130,14 +130,13 @@ class Response {
     }
 
     if (options?.headers && Object.keys(options.headers).length > 0) {
-      this._headers = options.headers;
+      this.headers = options.headers;
+      headers = this.writeableHeaders();
     }
 
     if (options.body && options.body.length > 0) {
       this.body = options.body;
     }
-
-    headers = this.writeableHeaders();
 
     const body = options.body ? options.body : "";
 
