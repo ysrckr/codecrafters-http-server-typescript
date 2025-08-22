@@ -190,9 +190,7 @@ class Server {
     socket.on("data", (data) => {
       this._request.init(data);
       this.handle();
-      socket.write(this._response.value, () => {
-        socket.end();
-      });
+      socket.write(this._response.value);
       socket.write(this._response.body);
     });
     socket.on("error", () => {
