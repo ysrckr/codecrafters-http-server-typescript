@@ -284,7 +284,14 @@ function rootHandler(req: Request, res: Response) {
 
 function echoHandler(req: Request, res: Response) {
   const message = req.params.echo;
-  const acceptEncoding = req.headers?.["Accept-Encoding"]?.split(",");
+  const encodings = ["br", "gzip", "deflate", "zstd"];
+  let acceptEncoding = req.headers?.["Accept-Encoding"]
+    ?.split(",")
+    .map((encoding) => encoding?.trim());
+  acceptEncoding = acceptEncoding?.filter((encoding) =>
+    encodings.includes(encoding),
+  );
+
   let contentEncoding: { [key: string]: string } = {
     "Content-Encoding": "",
   };
