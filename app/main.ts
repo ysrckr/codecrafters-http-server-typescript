@@ -98,7 +98,7 @@ class Request {
 
 class Response {
   private _headers: { [key: string]: string } = {};
-  private _body: string | Buffer = "";
+  public body: string | Buffer = "";
   private _value: string = "";
   private _version: string = "HTTP/1.1";
   private _path: string = "";
@@ -133,14 +133,15 @@ class Response {
     }
 
     if (options.body && options.body.length > 0) {
-      this._body = options.body;
+      this.body = options.body;
     }
 
     const headers = this.writeableHeaders();
 
     const body = options.body ? options.body : "";
 
-    this.value = `${this._version} ${status}${CRLF}${headers}${CRLF}${body}`;
+    this.value = `${this._version} ${status}${CRLF}${headers}${CRLF}`;
+    this.body = body;
   }
 
   public forbidden() {
@@ -192,6 +193,7 @@ class Server {
       socket.write(this._response.value, () => {
         socket.end();
       });
+      socket.write(this._response.body);
     });
     socket.on("error", () => {
       socket.write("Something went wrong", () => {
@@ -296,7 +298,7 @@ function echoHandler(req: Request, res: Response) {
     "Content-Encoding": "",
   };
   let body: {
-    data: string;
+    data: string | Buffer;
     compression: string | null;
   } = {
     data: message,
@@ -307,8 +309,8 @@ function echoHandler(req: Request, res: Response) {
     "Content-Type": CONTENT_TYPE.PLAIN_TEXT,
   };
   if (acceptEncoding?.length > 0) {
-    const result = compress(acceptEncoding[0], body.data);
-    body = { data: result.data.toString(), compression: result.compression };
+    const result = compress(acceptEncoding[0], body.data as string);
+    body = { data: result.data, compression: result.compression };
     contentEncoding["Content-Encoding"] = result.compression || "";
   }
 
@@ -316,7 +318,7 @@ function echoHandler(req: Request, res: Response) {
     headers = { ...headers, ...contentEncoding };
   }
 
-  const contentLength = String(body.data).length.toString();
+  const contentLength = body.data.length.toString();
 
   if (contentLength) {
     headers["Content-Length"] = contentLength;
@@ -324,7 +326,7 @@ function echoHandler(req: Request, res: Response) {
 
   res.send(HTTP_STATUS.OK, {
     headers,
-    body: String(body.data),
+    body: body.data,
   });
 }
 
@@ -404,9 +406,9 @@ function createFile(
 
 function compress(
   compression: string,
-  data: Buffer<ArrayBuffer> | string,
+  data: string,
 ): {
-  data: Buffer<ArrayBufferLike> | Buffer<ArrayBuffer> | string;
+  data: Buffer;
   compression: string | null;
 } {
   switch (compression) {
@@ -427,6 +429,6 @@ function compress(
       return { data: compressed, compression };
     }
     default:
-      return { data, compression: null };
+      return { data: Buffer.from(data), compression: null };
   }
 }
