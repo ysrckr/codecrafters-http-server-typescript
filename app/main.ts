@@ -123,8 +123,9 @@ class Response {
       body?: string | Buffer;
     },
   ) {
+    let headers = this.writeableHeaders();
     if (!options) {
-      this.value = `${this._version} ${status}${CRLF}${CRLF}`;
+      this.value = `${this._version} ${status}${CRLF}${headers}${CRLF}`;
       return;
     }
 
@@ -136,7 +137,7 @@ class Response {
       this.body = options.body;
     }
 
-    const headers = this.writeableHeaders();
+    headers = this.writeableHeaders();
 
     const body = options.body ? options.body : "";
 
@@ -161,6 +162,10 @@ class Response {
 
   public get path() {
     return this._path;
+  }
+
+  public set headers(headers: { [key: string]: string }) {
+    this._headers = { ...this.headers, ...headers };
   }
 }
 
@@ -190,8 +195,13 @@ class Server {
     socket.on("data", (data) => {
       this._request.init(data);
       this.handle();
+
       socket.write(this._response.value);
-      socket.write(this._response.body);
+      socket.write(this._response.body, () => {
+        if (this._request.headers["Connection"] === "close") {
+          socket.end();
+        }
+      });
     });
     socket.on("error", () => {
       socket.write("Something went wrong", () => {
@@ -215,6 +225,9 @@ class Server {
     });
 
     if (route) {
+      if (this._request.headers["Connection"] === "close") {
+        this._response.headers = { Connection: "close" };
+      }
       route.handler(this._request, this._response);
     } else {
       this._response.notFound();
